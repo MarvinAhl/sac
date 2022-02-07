@@ -28,7 +28,7 @@ while True:
     while not done:
         env.render()
 
-        actions = agent.act(obsv)
+        actions = agent.act_deterministic(obsv)
         new_obsv, _, done, _ = env.step(actions)
 
         obsv = new_obsv
