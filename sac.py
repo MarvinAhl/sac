@@ -48,9 +48,9 @@ class PolicyNetwork(nn.Module):
             unbound_actions = pi_dist.rsample()
             actions = torch.tanh(unbound_actions)
 
-            # Second term is result of applying tanh to the actions
-            log_probs = pi_dist.log_prob(unbound_actions).sum(dim=-1, keepdim=True) - \
-                torch.log(1.0 - actions**2).sum(dim=-1, keepdim=True)
+            # Second term is result of applying tanh to the actions (clipping ensures numerical stability)
+            log_probs = (pi_dist.log_prob(unbound_actions) - \
+                torch.log((1.0 - actions**2).clip(1e-08, 1.0))).sum(dim=-1, keepdim=True)
         else:
             actions = torch.clip(mu, -1.0, 1.0)
             log_probs = None
@@ -154,7 +154,7 @@ class ReplayBuffer:
 
 class SAC:
     def __init__(self, state, actions, policy_hidden=(512, 512), value_hidden=(512, 512), gamma=0.99,
-                 learning_rate=0.0002, learning_rate_alpha=0.001, alpha=1.0, buffer_size_max=50000,
+                 learning_rate=0.0002, alpha=1.0, buffer_size_max=50000,
                  buffer_size_min=1024, batch_size=64, replays=1, tau=0.01, device='cpu'):
         """
         state: Integer of State Dimension
@@ -177,14 +177,13 @@ class SAC:
 
         # The entropy temperature alpha, it is automatically tuned
         self.log_alpha = tensor([np.log(alpha)], dtype=torch.float32, requires_grad=True, device=device)
-        self.alpha_optimizer = torch.optim.Adam([self.log_alpha], lr=learning_rate_alpha)
+        self.alpha_optimizer = torch.optim.Adam([self.log_alpha], lr=learning_rate)
 
         self.alpha_start = alpha
 
-        self.target_entropy = -actions  # Used to update alpha
+        self.target_entropy = -actions  # Used to update alpha, more like a minimum entropy constraint
 
         self.learning_rate = learning_rate
-        self.learning_rate_alpha = learning_rate_alpha
 
         self.buffer = ReplayBuffer(state, actions, buffer_size_max)
         self.buffer_size_max = buffer_size_max
@@ -214,7 +213,7 @@ class SAC:
         self.value_optimizer = torch.optim.Adam(self.value_net.parameters(), lr=self.learning_rate)
 
         self.log_alpha = tensor([np.log(self.alpha_start)], dtype=torch.float32, requires_grad=True, device=self.device)
-        self.alpha_optimizer = torch.optim.Adam([self.log_alpha], lr=self.learning_rate_alpha)
+        self.alpha_optimizer = torch.optim.Adam([self.log_alpha], lr=self.learning_rate)
 
         self.buffer = ReplayBuffer(self.state, self.actions, self.buffer_size_max)
 
@@ -271,7 +270,7 @@ class SAC:
             next_actions, next_log_probs = self.policy_net(next_states)
             next_values_a, next_values_b = self.target_value_net(next_states, next_actions)
 
-            td_targets = rewards + self.gamma * (1 - terminals) * \
+            td_targets = rewards + self.gamma * (1.0 - terminals) * \
                 (torch.min(next_values_a, next_values_b).detach() - alpha * next_log_probs)
             predictions_a, predictions_b = self.value_net(states, actions)
             td_errors_a = td_targets - predictions_a
@@ -286,13 +285,13 @@ class SAC:
             pred_actions, log_probs = self.policy_net(states)
             pred_values_a, pred_values_b = self.value_net(states, pred_actions)
             policy_loss = -(torch.min(pred_values_a, pred_values_b) - alpha * log_probs).mean()
-
+            
             self.policy_optimizer.zero_grad()
             policy_loss.backward()
             self.policy_optimizer.step()
 
-            # Entropy Temperature update
-            alpha_loss = -(self.log_alpha * (self.target_entropy + log_probs).detach()).mean()
+            # Entropy Temperature update (uses log_alpha instead of alpha to make sure alpha is always positive)
+            alpha_loss = (self.log_alpha * (-log_probs - self.target_entropy).detach()).mean()
 
             self.alpha_optimizer.zero_grad()
             alpha_loss.backward()

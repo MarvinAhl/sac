@@ -19,7 +19,7 @@ nS = env.observation_space.shape[0]
 nA = env.action_space.shape[0]
 
 agent = SAC(nS, nA, policy_hidden=(128, 128), value_hidden=(128, 128), buffer_size_max=30000,
-             alpha=2.3, buffer_size_min=256, device=device)
+            buffer_size_min=256, device=device)
 
 episode = 0
 while True:
