@@ -18,8 +18,8 @@ env = gym.make('LunarLanderContinuous-v2')
 nS = env.observation_space.shape[0]
 nA = env.action_space.shape[0]
 
-agent = SAC(nS, nA, policy_hidden=(128, 128), value_hidden=(128, 128), buffer_size_max=30000,
-            buffer_size_min=256, device=device)
+agent = SAC(nS, nA, policy_hidden=(128, 128), value_hidden=(128, 128), warmup_episodes=512,
+            buffer_size_max=30000, buffer_size_min=256, device=device)
 
 episode = 0
 while True:

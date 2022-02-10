@@ -155,7 +155,7 @@ class ReplayBuffer:
 class SAC:
     def __init__(self, state, actions, policy_hidden=(512, 512), value_hidden=(512, 512), gamma=0.99,
                  learning_rate=0.0002, alpha=1.0, warmup_episodes=1024, warmup_a=0.3, warmup_b=0.8, buffer_size_max=50000,
-                 buffer_size_min=512, batch_size=64, replays=1, tau=0.005, device='cpu'):
+                 buffer_size_min=512, batch_size=64, nu=0.996, nu_anneal_steps=100000, cmin=None, tau=0.005, device='cpu'):
         """
         state: Integer of State Dimension
         actions: Integer of Number of Action
@@ -196,7 +196,12 @@ class SAC:
         self.buffer_size_max = buffer_size_max
         self.buffer_size_min = buffer_size_min
         self.batch_size = batch_size
-        self.replays = replays  # On how many batches it should train after each step
+
+        # Emphasizing Recent Experience parameters
+        self.nu = nu
+        self.nu_start = nu
+        self.nu_anneal_steps = nu_anneal_steps
+        self.cmin = buffer_size_min if cmin == None else cmin
 
         # Can be calculated by exp(- dt / lookahead_horizon)
         self.gamma = gamma  # Reward discount rate
@@ -226,6 +231,8 @@ class SAC:
 
         self.episode = 0
         self.warmup_actions = torch.np(self.actions, dtype=torch.float32)
+
+        self.nu = self.nu_start
 
         self.rng = np.random.default_rng()
 
@@ -267,14 +274,14 @@ class SAC:
         """
         self.buffer.store_experience(state, actions, reward, next_state, terminal)
     
-    def train(self):
+    def train(self, replays):
         """
         Train Value and Target Networks on batches from replay buffer.
         """
         if len(self.buffer) < self.buffer_size_min:
             return  # Dont train until Replay Buffer has collected a certain number of initial experiences
 
-        for _ in range(self.replays):
+        for k in range(replays):
             states, actions, rewards, next_states, terminals = self.buffer.get_experiences(self.batch_size)
 
             states = torch.from_numpy(states).to(self.device)
