@@ -1,7 +1,7 @@
 import sys
 sys.path.insert(1, '../..')
 
-from sac import SAC
+from sac_ere import SAC
 
 import torch
 
@@ -27,6 +27,7 @@ while True:
         episode += 1
         print(f'Episode {episode} started')
         obsv, done = env.reset(), False
+        step = 0
 
         while not done:
             env.render()
@@ -39,9 +40,11 @@ while True:
             terminal = done and not time_out
 
             agent.experience(obsv, actions, reward, new_obsv, terminal)
-            agent.train()
 
             obsv = new_obsv
+            step += 1
+        
+        agent.train(step)
     except KeyboardInterrupt:
         break
 

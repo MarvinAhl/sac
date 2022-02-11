@@ -135,11 +135,20 @@ class ReplayBuffer:
             return True
         return False
 
-    def get_experiences(self, batch_size):
+    def get_experiences(self, batch_size, c=None):
         """
-        Returns batch of experiences for replay.
+        Returns batch of experiences for replay sampled from last c experiences.
         """
-        indices = self.rng.choice(self.__len__(), batch_size)
+        c = self.__len__() if c == None else c
+        c = min(c, self.__len__())
+
+        indices = self.rng.choice(c, batch_size)
+
+        # Shift indices to sample from last c experiences
+        if self.full:
+            indices[indices >= self.index] += self.max_len - c
+        else:
+            indices += self.index - c
 
         states = self.states[indices]
         actions = self.actions[indices]
@@ -200,7 +209,7 @@ class SAC:
         # Emphasizing Recent Experience parameters
         self.nu = nu
         self.nu_start = nu
-        self.nu_anneal_steps = nu_anneal_steps
+        self.nu_anneal_rate = (1.0 - nu) / nu_anneal_steps
         self.cmin = buffer_size_min if cmin == None else cmin
 
         # Can be calculated by exp(- dt / lookahead_horizon)
@@ -274,15 +283,17 @@ class SAC:
         """
         self.buffer.store_experience(state, actions, reward, next_state, terminal)
     
-    def train(self, replays):
+    def train(self, steps):
         """
         Train Value and Target Networks on batches from replay buffer.
         """
         if len(self.buffer) < self.buffer_size_min:
             return  # Dont train until Replay Buffer has collected a certain number of initial experiences
 
-        for k in range(replays):
-            states, actions, rewards, next_states, terminals = self.buffer.get_experiences(self.batch_size)
+        for k in range(steps):
+            c = len(self.buffer) * self.nu**(k*1000/steps)
+            c_clip = max(int(c), self.cmin)
+            states, actions, rewards, next_states, terminals = self.buffer.get_experiences(self.batch_size, c_clip)
 
             states = torch.from_numpy(states).to(self.device)
             rewards = torch.from_numpy(rewards).to(self.device)
@@ -324,6 +335,10 @@ class SAC:
             self.alpha_optimizer.step()
 
             self._update_targets(self.tau)
+
+            # Anneal nu
+            self.nu += self.nu_anneal_rate
+            self.nu = min(self.nu, 1.0)
     
     def save_net(self, path):
         torch.save(self.policy_net.state_dict(), 'policy_' + path)
